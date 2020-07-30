@@ -5,6 +5,12 @@ from ipaddress import ip_address, IPv4Address
 import netifaces
 import argparse
 
+# help function
+def help():
+    # print("execute: {0} -i <net_interface>".format(sys.argv[0]))
+    # print("e.g.: {0} -i eno1\n".format(sys.argv[0]))
+    print("For help write: sudo python3 monitor.py -h")
+    exit(1)
 
 # add optional arguments for program
 parser = argparse.ArgumentParser(description='Compute throughput for each TCP, UDP, ICMP flow')
@@ -23,6 +29,9 @@ b_B_SWITCH = results.b_B_SWITCH
 
 
 # take interfaces given as parameters
+if (results.INTERFACES is None):
+    help()
+
 INTERFACES = results.INTERFACES.split(",")
 if len(INTERFACES) == 0:
     help()
@@ -36,12 +45,6 @@ INTERVAL = float(results.INTERVAL)
 def getIp(interface):
     return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
-
-# help function
-def help():
-    print("execute: {0} -i <net_interface>".format(sys.argv[0]))
-    print("e.g.: {0} -i eno1\n".format(sys.argv[0]))
-    exit(1)
 
 
 # function for printing calculated throughput in format B/KB/MB/GB
@@ -184,7 +187,7 @@ try:
         # clear the console
         os.system('cls||clear')
 
-        print("Throughput measurement on " + ", ".join(INTERFACES) + " interfaces each " + str(INTERVAL) + " seconds:\n")
+        print("Throughput measurement on " + ", ".join(INTERFACES) + " each " + str(INTERVAL) + " seconds:\n")
 
 
         # print("\nTCP: {0}, UDP: {1}, ICMP: {2}".
@@ -304,7 +307,7 @@ try:
         #         print_throughput("ALL", throughput_all)
 
 
-        time.sleep(1)
+        time.sleep(INTERVAL)
         
 except KeyboardInterrupt:
     pass
