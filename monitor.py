@@ -57,10 +57,11 @@ int count_packets(struct __sk_buff *skb) {
     int protocol = ip->nextp;
     
     // size of ip packet
-    int size = ip->tlen;
+    // int size = ip->tlen;
+    int size = skb->len;
 
     // packet without ip header
-    size -= ip->hlen;
+    // size -= ip->hlen;
     int size_goodput = size;
     
     u32 daddr, saddr;
@@ -208,6 +209,8 @@ def optional_args():
                         help='display the throughput in Bytes/second format')
     parser.add_argument('-j', dest='INTERVAL_JITTER', default=0, help='specify \
                         the transmission interval in miliseconds between packets')
+    parser.add_argument('-test', action='store_true', default=False, help='activate \
+                        it to not clear the console')
 
     return parser
 
@@ -239,11 +242,14 @@ def take_args():
     # take the interval between packets transmission (for jitter measurement)
     INTERVAL_JITTER = float(results.INTERVAL_JITTER)
 
+    # take the filters from json
     rules_json = None
     with open(CONFIG_FILE_NAME) as json_file:
         rules_json = json.load(json_file)
 
-    return b_B_SWITCH, INTERFACES, INTERVAL_throughput, rules_json, INTERVAL_JITTER
+    TEST = results.test
+
+    return b_B_SWITCH, INTERFACES, INTERVAL_throughput, rules_json, INTERVAL_JITTER, TEST
 
 
 # -----------------------------------------------------------------------------
@@ -255,27 +261,27 @@ def print_throughput_goodput(protocol, throughput):
         # bits/sec
         throughput = throughput * 8  # transform in bits
         if throughput >= (1024 ** 4):
-            print(protocol + " bitrate [Tbits/sec]:  %.4f" % (throughput / (1024 ** 4)))
+            print(protocol + " bitrate [Tbits/sec]:  %.4f" % (throughput / (1024 ** 4)), flush=True)
         elif throughput >= (1024 ** 3):
-            print(protocol + " bitrate [Gbits/sec]:  %.4f" % (throughput / (1024 ** 3)))
+            print(protocol + " bitrate [Gbits/sec]:  %.4f" % (throughput / (1024 ** 3)), flush=True)
         elif throughput >= (1024 ** 2):
-            print(protocol + " bitrate [Mbits/sec]:  %.4f" % (throughput / (1024 ** 2)))
+            print(protocol + " bitrate [Mbits/sec]:  %.4f" % (throughput / (1024 ** 2)), flush=True)
         elif throughput >= 1024:
-            print(protocol + " bitrate [Kbits/sec]:  %.4f" % (throughput / 1024))
+            print(protocol + " bitrate [Kbits/sec]:  %.4f" % (throughput / 1024), flush=True)
         else:
-            print(protocol + " bitrate [bits/sec]:  %.4f" % throughput)
+            print(protocol + " bitrate [bits/sec]:  %.4f" % throughput, flush=True)
     else:
         # Bytes/sec
         if throughput >= (1024 ** 4):
-            print(protocol + " bitrate [TBytes/sec]:  %.4f" % (throughput / (1024 ** 4)))
+            print(protocol + " bitrate [TBytes/sec]:  %.4f" % (throughput / (1024 ** 4)), flush=True)
         elif throughput >= (1024 ** 3):
-            print(protocol + " bitrate [GBytes/sec]:  %.4f" % (throughput / (1024 ** 3)))
+            print(protocol + " bitrate [GBytes/sec]:  %.4f" % (throughput / (1024 ** 3)), flush=True)
         elif throughput >= (1024 ** 2):
-            print(protocol + " bitrate [MBytes/sec]:  %.4f" % (throughput / (1024 ** 2)))
+            print(protocol + " bitrate [MBytes/sec]:  %.4f" % (throughput / (1024 ** 2)), flush=True)
         elif throughput >= 1024:
-            print(protocol + " bitrate [KBytes/sec]:  %.4f" % (throughput / 1024))
+            print(protocol + " bitrate [KBytes/sec]:  %.4f" % (throughput / 1024), flush=True)
         else:
-            print(protocol + " bitrate [Bytes/sec]:  %.4f" % throughput)
+            print(protocol + " bitrate [Bytes/sec]:  %.4f" % throughput, flush=True)
 
 
 # -----------------------------------------------------------------------------
@@ -417,6 +423,7 @@ def compute_throughput_goodput(proto, count, initial_time, size_per_interval,
 
     if count[index] != 0 and initial_time[index] == 0:
         initial_time[index] = time.time()
+        print_throughput_goodput(proto, 0.0000)
     else:
         if count[index] != 0 and initial_time[index] != 0:
 
@@ -433,6 +440,9 @@ def compute_throughput_goodput(proto, count, initial_time, size_per_interval,
                 initial_time[index] = time.time()
             else:
                 print_throughput_goodput(proto, prev_throughput[index])
+        else:
+            print_throughput_goodput(proto, 0.0000)
+
 
 
 # -----------------------------------------------------------------------------
@@ -467,7 +477,7 @@ def compute_jitter(proto, jitter_values):
 # -----------------------------------------------------------------------------
 
 
-(b_B_SWITCH, INTERFACES, INTERVAL_throughput, rules_json, INTERVAL_JITTER) = take_args()
+(b_B_SWITCH, INTERFACES, INTERVAL_throughput, rules_json, INTERVAL_JITTER, TEST) = take_args()
 
 # apply filters
 INTERVAL_JITTER_ns = INTERVAL_JITTER * 1000000
@@ -552,17 +562,19 @@ try:
                                      socket.IPPROTO_ICMP: 0}
 
         # clear the console
-        os.system('clear')
+        if TEST == False:
+            os.system('clear')
 
         # jitter measurement
         jitter_values[socket.IPPROTO_TCP] = bpf.get_table('jitter_values_tcp')
         jitter_values[socket.IPPROTO_UDP] = bpf.get_table('jitter_values_udp')
         jitter_values[socket.IPPROTO_ICMP] = bpf.get_table('jitter_values_icmp')
-
-        compute_jitter("TCP", jitter_values)
-        compute_jitter("UDP", jitter_values)
-        compute_jitter("ICMP", jitter_values)
-        print()
+        
+        if TEST == False:
+            compute_jitter("TCP", jitter_values)
+            compute_jitter("UDP", jitter_values)
+            compute_jitter("ICMP", jitter_values)
+            print()
 
         # Throughput measurement
         print("THROUGHPUT measurement on " + ", ".join(INTERFACES) +
@@ -577,18 +589,19 @@ try:
         print()
 
         # Goodput measurement
-        print("GOODPUT measurement on " + ", ".join(INTERFACES) +
-              " each " + str(INTERVAL_throughput) + " seconds:")
+        if TEST == False:
+            print("GOODPUT measurement on " + ", ".join(INTERFACES) +
+                " each " + str(INTERVAL_throughput) + " seconds:")
 
-        compute_throughput_goodput("TCP", count, initial_time_goodput, 
-                                   size_per_interval_goodput, total_size_goodput, 
-                                   prev_total_size_goodput, prev_goodput)
-        compute_throughput_goodput("UDP", count, initial_time_goodput, 
-                                   size_per_interval_goodput, total_size_goodput, 
-                                   prev_total_size_goodput, prev_goodput)
-        compute_throughput_goodput("ICMP", count, initial_time_goodput, 
-                                   size_per_interval_goodput, total_size_goodput, 
-                                   prev_total_size_goodput, prev_goodput)
+            compute_throughput_goodput("TCP", count, initial_time_goodput, 
+                                    size_per_interval_goodput, total_size_goodput, 
+                                    prev_total_size_goodput, prev_goodput)
+            compute_throughput_goodput("UDP", count, initial_time_goodput, 
+                                    size_per_interval_goodput, total_size_goodput, 
+                                    prev_total_size_goodput, prev_goodput)
+            compute_throughput_goodput("ICMP", count, initial_time_goodput, 
+                                    size_per_interval_goodput, total_size_goodput, 
+                                    prev_total_size_goodput, prev_goodput)
 
         time.sleep(INTERVAL_throughput)
 

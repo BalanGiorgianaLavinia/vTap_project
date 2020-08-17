@@ -14,14 +14,14 @@ You need to have the following software:
 
 # Instalation
 ## Ubuntu
-    sudo apt install python3, python3-pip, bcc, git -y
+    sudo apt install python3 python3-pip bcc git -y
 
     pip3 install netifaces
 
     git clone https://bitbucket.it.keysight.com/scm/ixvmintern/vtap-project.git
 
 ## Fedora
-    yum install bcc, python3-dev
+    yum install bcc python3
 
     pip3 install netifaces
 
