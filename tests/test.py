@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import os
 import subprocess
 import signal
@@ -7,7 +7,6 @@ import tempfile
 import errno
 import json
 
-MEASURE_UNIT = 'MiB'
 configs = [
     {
         "RULES": [
@@ -49,13 +48,14 @@ def kill_process(cmd):
         except ProcessLookupError:
             pass
 
+
 # run veth.sh
 os.system('./veth.sh > /dev/null 2>&1')
 
 # change directory 
 os.chdir("../")
 
-os.system("cp config.json config.json.bk")
+os.system("cp config.json config.json.bk > /dev/null")
 
 bmon_pipe = 'bmon_pipe'
 monitor_pipe = 'monitor_pipe'
@@ -70,11 +70,14 @@ for i in range(4):
     if i == 0:
         print('TEST ' + str(i + 1) + ': Monitor all packets coming on veth1 \n\t' + 
               'indifferently of ip/port source/destination or protocol \n\twith ', end='')
+   
     elif i == 1:
         print('\nTEST ' + str(i + 1) + ': Filter only TCP and UDP packets \n\twith ', end='')
+    
     elif i == 2:
         print('\nTEST ' + str(i + 1) + ': Filter only the packets with source IP ' + 
               '192.168.51.1 which represents, in fact, only the ICMP packets \n\twith ', end='')
+    
     elif i == 3:
         print('\nTEST ' + str(i + 1) + ': Filter the packets with source IP 192.168.51.2 ' + 
               '(TCP and UDP flows matched) and source port 4500 (=> only UDP flow matched) ' + 
@@ -93,10 +96,10 @@ for i in range(4):
 
     # start MONITOR
     time.sleep(1)
-    print('\nRun MONITOR: python3 monitor.py -i veth1 -B')
+    print('\nRun MONITOR: python3 monitor.py -i veth1')
 
     proc_bmon = subprocess.Popen("bmon -o ascii -p veth1 > bmon_pipe &", shell=True)
-    proc_monitor = subprocess.Popen("python3 monitor.py -i veth1 -B -test " +
+    proc_monitor = subprocess.Popen("python3 monitor.py -i veth1 -test_throughput " +
                                     "> monitor_pipe &", shell=True)
 
 
@@ -128,7 +131,6 @@ for i in range(4):
     t = time.time()
     try:
         while True:
-
             line_bmon = open_bmon_pipe.readline()
             line_bmon = line_bmon.split()
             if len(line_bmon) != 5:
@@ -154,19 +156,20 @@ for i in range(4):
                             udp_throughput = float(line_monitor[3])
                         else:
                             icmp_throughput = float(line_monitor[3])
+
             monitor_throughput += tcp_throughput + udp_throughput + icmp_throughput
 
             if time.time() - t >= 6:
                 break
 
         if i == 0:
-            print('\n\tBMON result: ' + str(bmon_throughput) + MEASURE_UNIT)
+            print('\n\tBMON result: ' + str(bmon_throughput) + 'MB')
 
-        print('\tmonitor.py results: TCP->' + str(tcp_throughput) + MEASURE_UNIT + \
-            '     UDP->' + str(udp_throughput) + MEASURE_UNIT + \
-            '     ICMP->' + str(icmp_throughput) + MEASURE_UNIT)
+        print('\tmonitor.py results: TCP->' + str(tcp_throughput) + 'MB' + \
+            '     UDP->' + str(udp_throughput) + 'MB' + \
+            '     ICMP->' + str(icmp_throughput) + 'MB')
         if i == 0:
-            print('\tSum of monitor flow throughputs: ' + str(monitor_throughput) + MEASURE_UNIT)
+            print('\tSum of monitor flow throughputs: ' + str(monitor_throughput) + 'MB')
         
         time.sleep(1)
 
@@ -204,18 +207,22 @@ for i in range(4):
 
     except KeyboardInterrupt:
         print('\nexiting test..')
+
     finally:
         open_bmon_pipe.close()
         open_monitor_pipe.close()
+
         kill_process('bmon')
         kill_process('monitor.py')
         kill_process('trafgen')
         os.kill(proc_trafgen.pid, signal.SIGINT)
+        
         os.system("rm {0} {1}".format(monitor_pipe, bmon_pipe))
         os.system("rm config.json")
 
 print('\n\nFor a better understanding of the tests behavior take a look at the ' +
       'config.cfg file (constraints of the generated packages)\n')
 
-os.system("cp config.json.bk config.json")
+os.system("cp config.json.bk config.json > /dev/null")
+os.system("chmod g=rw,o=rw config.json")
 os.system("rm config.json.bk")
