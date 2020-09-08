@@ -1,4 +1,6 @@
-# ***Testing Throughput Measurement Program*** #
+# ***Acceptance tests*** #
+
+## ***Testing Throughput Measurement Program*** #
 
 ## Requirements
 You need to have bmon and trafgen tools already installed.
@@ -16,7 +18,7 @@ You need to have bmon and trafgen tools already installed.
 
 
 
-# ***Testing Jitter Measurement Program*** #
+## ***Testing Jitter Measurement Program*** #
 
 ## Requirements
 You need to have trafgen tool already installed.
@@ -31,7 +33,7 @@ You need to have trafgen tool already installed.
     sudo python3 test_jitter.py      # from the tests folder
 
 
-# ***Testing Packet Loss Measurement Program*** #
+## ***Testing Packet Loss Measurement Program*** #
 
 ## Requirements
 You need to have gnome terminal and trafgen tool already installed.

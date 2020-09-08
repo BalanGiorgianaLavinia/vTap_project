@@ -12,24 +12,36 @@ configs = [
         "RULES": [
             "- - - - -"
         ],
+        "PATTERN": "0xFFFFFFFF",
+        "OFFSET": -1,
+        "SEQUENCE_THRESHOLD": 2
     },
 
     {
         "RULES": [
             "- - - - [TCP,UDP]"
         ],
+        "PATTERN": "0xFFFFFFFF",
+        "OFFSET": -1,
+        "SEQUENCE_THRESHOLD": 2
     },
 
     {
         "RULES": [
             "192.168.51.1 - - - -"
         ],
+        "PATTERN": "0xFFFFFFFF",
+        "OFFSET": -1,
+        "SEQUENCE_THRESHOLD": 2
     },
 
     {
         "RULES": [
             "192.168.51.2 - 4500 - -"
         ],
+        "PATTERN": "0xFFFFFFFF",
+        "OFFSET": -1,
+        "SEQUENCE_THRESHOLD": 2
     }
 
 ]
@@ -174,9 +186,10 @@ for i in range(4):
         time.sleep(1)
 
         if i == 0:
+            pass
             print('\nTest if a tollerance of 5%' + ' is verified and...', end='')
             time.sleep(2)
-            # test with tollerance 5%
+            # test with tollerance 10%
             if monitor_throughput >= 0.95*bmon_throughput and \
                monitor_throughput <= 1.05*bmon_throughput:
                 print('CORRECT MEASUREMENT!!!')

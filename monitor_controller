@@ -1,0 +1,116 @@
+#!/bin/python3
+"""
+script for start/stop monitor program or check the status of it
+You can add --detached option for running monitor in detached mode
+(the program wiil run in background); this option can be added only 
+after start
+"""
+import os
+import sys
+import argparse
+import subprocess
+import signal
+import time
+
+def kill_process(cmd):
+    output = subprocess.check_output("ps aux | grep \"%s\" | awk '{print $2}'" % cmd, \
+                                     stderr=subprocess.STDOUT,\
+                                     shell=True)
+
+    output = output.decode('UTF-8')
+    output = output.split()
+    output = list(map(lambda x: int(x), output))
+    for pid in output:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+def check_monitor():
+    cmd = "sudo python3 monitor.py"
+    running = False
+    output = subprocess.check_output("ps aux | grep \"%s\"" % cmd, stderr=subprocess.STDOUT, shell=True).decode('UTF-8')
+    output = output.split('\n')
+
+    for line in output:
+        if "grep" not in line and "/bin/sh" not in line:
+            output = line
+            break
+
+    running = output != ""
+
+    return running
+
+def start_monitor(args, detached):
+    cmd = "sudo python3 monitor.py " + args
+    if detached:
+        cmd += " > /dev/null &"
+    monitor_running = check_monitor()
+
+    if monitor_running:
+        print("Monitor.py is already running")
+        exit(1)
+
+    if not detached:
+        print("To exit monitor.py press CTRL + C")
+        time.sleep(2)
+
+    print("Starting monitor.py with {}".format(cmd))
+    os.system(cmd)
+
+def stop_monitor():
+    monitor_running = check_monitor()
+    if monitor_running:
+        cmd = "monitor.py"
+        print("Stopping monitor.py...")
+        kill_process(cmd)
+        print("Monitor.py stopped")
+    else:
+        print("Monitor.py is already stopped")
+
+def print_status():
+    monitor_running = check_monitor()
+
+    if monitor_running:
+        print("Monitor.py is running")
+    else:
+        print("Monitor.py is not running")
+
+    exit(1)
+
+def print_usage():
+    print("Usage:")
+    print("sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-packet_loss]")
+    print("sudo ./monitor_controller stop")
+    print("sudo ./monitor_controller status")
+    exit(-1)
+
+def parse_args():
+    if len(sys.argv) < 2:
+        print(print_usage())
+
+
+    monitor_args = " ".join(sys.argv[2:])
+
+    start = "start" == sys.argv[1]
+    stop = "stop" == sys.argv[1]
+    status = "status" == sys.argv[1]
+    detached = False
+
+    if "--detached" in sys.argv:
+        detached = "--detached" == sys.argv[2]
+
+    if detached:
+        monitor_args = " ".join(sys.argv[3:])
+
+    if start:
+        start_monitor(monitor_args, detached)
+    elif stop:
+        stop_monitor()
+    elif status:
+        print_status()
+    else:
+        print_usage()
+
+
+parse_args()

@@ -8,12 +8,15 @@ import argparse
 import json
 import math
 import ctypes
+import prometheus_client as prom
 
 
 INDEX_IP_SRC = 0
 INDEX_IP_DST = 1
+
 INDEX_PORT_SRC = 2
 INDEX_PORT_DST = 3
+
 INDEX_PROTOCOL = 4
 
 JITTER_ARRAY_SIZE = 2048
@@ -22,6 +25,58 @@ JITTER_ARRAY_SIZE = 2048
 JITTER_FLOW_STOPPED = 2
 
 CONFIG_FILE_NAME = "config.json"
+
+gauges_dict = {
+    "TCP": {
+        "throughput": prom.Gauge('tcp_throughput', 'Throughput TCP (ms)'),
+        "goodput": prom.Gauge('tcp_goodput', 'Goodput TCP (ms)'),
+        "jitter": {
+            "avg": prom.Gauge('tcp_jitter_avg', 'Average inter-arrival TCP (ms)'),
+            "stddev": prom.Gauge('tcp_jitter_stddev', 'Jitter/STDDEV TCP (ms)')
+        },
+        "pkt_drop": {
+            "seq_num": prom.Gauge('tcp_seq_num', 'Last sequence number TCP'),
+            "count": prom.Gauge('tcp_count', 'Number of TCP packets'),
+            "reverse_err": prom.Gauge('tcp_reverse_err', 'Number of reverse errors TCP'),
+            "small_err": prom.Gauge('tcp_small_err', 'Number of small errors TCP'),
+            "big_err": prom.Gauge('tcp_big_err', 'Number of big errors TCP'),
+            "total_err": prom.Gauge('tcp_total_err', 'Number of total errors TCP')
+        }
+    },
+    "UDP": {
+        "throughput": prom.Gauge('udp_throughput', 'Throughput UDP (ms)'),
+        "goodput": prom.Gauge('udp_goodput', 'Goodput UDP (ms)'),
+        "jitter": {
+            "avg": prom.Gauge('udp_jitter_avg', 'Average inter-arrival UDP (ms)'),
+            "stddev": prom.Gauge('udp_jitter_stddev', 'Jitter/STDDEV UDP (ms)')
+        },
+        "pkt_drop": {
+            "seq_num": prom.Gauge('udp_seq_num', 'Last sequence number UDP'),
+            "count": prom.Gauge('udp_count', 'Number of UDP packets'),
+            "reverse_err": prom.Gauge('udp_reverse_err', 'Number of reverse errors UDP'),
+            "small_err": prom.Gauge('udp_small_err', 'Number of small errors UDP'),
+            "big_err": prom.Gauge('udp_big_err', 'Number of big errors UDP'),
+            "total_err": prom.Gauge('udp_total_err', 'Number of total errors UDP')
+        }
+    },
+    "ICMP": {
+        "throughput": prom.Gauge('icmp_throughput', 'Throughput ICMP (ms)'),
+        "goodput": prom.Gauge('icmp_goodput', 'Goodput ICMP (ms)'),
+        "jitter": {
+            "avg": prom.Gauge('icmp_jitter_avg', 'Average inter-arrival ICMP (ms)'),
+            "stddev": prom.Gauge('icmp_jitter_stddev', 'Jitter/STDDEV ICMP (ms)')
+        },
+        "pkt_drop": {
+            "seq_num": prom.Gauge('icmp_seq_num', 'Last sequence number ICMP'),
+            "count": prom.Gauge('icmp_count', 'Number of ICMP packets'),
+            "reverse_err": prom.Gauge('icmp_reverse_err', 'Number of reverse errors ICMP'),
+            "small_err": prom.Gauge('icmp_small_err', 'Number of small errors ICMP'),
+            "big_err": prom.Gauge('icmp_big_err', 'Number of big errors ICMP'),
+            "total_err": prom.Gauge('icmp_total_err', 'Number of total errors ICMP')
+        }
+    }
+}
+
 
 
 # define BPF program
@@ -84,7 +139,9 @@ int count_packets(struct __sk_buff *skb) {
     int protocol = ip->nextp;
     
     // size of ip packet
-    // u64 size = ip->tlen;
+    u64 size_goodput = ip->tlen;
+
+    // size of the entire packet including ethernet header
     u64 size = skb->len;
 
     // ip->hlen is the number of 32-bit words in ip header
@@ -92,8 +149,7 @@ int count_packets(struct __sk_buff *skb) {
     u32 ip_header_length = ip->hlen << 2;
 
     // packet without ip header
-    // size -= ip_header_length;
-    u64 size_goodput = size;
+    size_goodput -= ip_header_length;
 
     
     u32 daddr, saddr;
@@ -310,11 +366,13 @@ def optional_args():
     parser.add_argument('-j', dest='INTERVAL_JITTER', default=0, help='specify \
                         the transmission interval in miliseconds between packets')
     parser.add_argument('-test_throughput', action='store_true', default=False, help='activate \
-                        it for throughput test')
+                        it for throughput acceptance test (used in test script)')
     parser.add_argument('-test_jitter', action='store_true', default=False, help='activate \
-                        it for jitter test')
+                        it for jitter acceptance test (used in test script)')
     parser.add_argument('-packet_loss', action='store_true', default=False, help='activate \
-                        it for packet loss statistics')
+                        it for packet loss acceptance test (used in test script)')
+    parser.add_argument('-server_port', dest='SERVER_PORT', default=8080, help='port \
+                        of the server in which monitor data is published')
 
     return parser
 
@@ -360,8 +418,11 @@ def take_args():
     # packet loss statistics enable
     PACKET_LOSS = results.packet_loss
 
+    # server port
+    SERVER_PORT = int(results.SERVER_PORT)
+
     return MEASURE_IN_BITS_PER_SEC, INTERFACES, INTERVAL_throughput, \
-        rules_json, INTERVAL_JITTER, TEST_THROUGHPUT, TEST_JITTER, PACKET_LOSS
+        rules_json, INTERVAL_JITTER, TEST_THROUGHPUT, TEST_JITTER, PACKET_LOSS, SERVER_PORT
 
 
 # -----------------------------------------------------------------------------
@@ -532,22 +593,18 @@ def f_filter(bpf_text, rules_json):
 
 
 def filter_packet_loss(bpf_text, PACKET_LOSS):
-    if PACKET_LOSS:
-        PATTERN = rules_json["PATTERN"]
-        OFFSET = rules_json["OFFSET"]
-        SEQ_THRESHOLD = rules_json["SEQUENCE_THRESHOLD"]
+    # if PACKET_LOSS:
+    # pattern is given in hex
+    PATTERN = rules_json["PATTERN"]
+    PATTERN = int(PATTERN, 16)
+    OFFSET = rules_json["OFFSET"]
+    SEQ_THRESHOLD = rules_json["SEQUENCE_THRESHOLD"]
 
-        bpf_text = bpf_text.replace('FILTER_PATTERN', str(PATTERN))
+    bpf_text = bpf_text.replace('FILTER_PATTERN', str(PATTERN))
 
-        bpf_text = bpf_text.replace('FILTER_OFFSET', str(OFFSET))
+    bpf_text = bpf_text.replace('FILTER_OFFSET', str(OFFSET))
 
-        bpf_text = bpf_text.replace('FILTER_THRESHOLD', str(SEQ_THRESHOLD))
-    else:
-        bpf_text = bpf_text.replace('FILTER_PATTERN', '-1')
-
-        bpf_text = bpf_text.replace('FILTER_OFFSET', '-1')
-
-        bpf_text = bpf_text.replace('FILTER_THRESHOLD', '2')
+    bpf_text = bpf_text.replace('FILTER_THRESHOLD', str(SEQ_THRESHOLD))
 
     return bpf_text
 
@@ -558,6 +615,7 @@ def filter_packet_loss(bpf_text, PACKET_LOSS):
 def compute_throughput_goodput(proto, count, initial_time, size_per_interval,
                                total_size, prev_total_size, prev_throughput):
     index = 0
+    throughput = 0
 
     if proto == "ICMP":
         index = socket.IPPROTO_ICMP
@@ -590,6 +648,8 @@ def compute_throughput_goodput(proto, count, initial_time, size_per_interval,
         else:
             print_rate(proto, 0.0000)
 
+    # return throughput in Bytes
+    return throughput
 
 # -----------------------------------------------------------------------------
 
@@ -651,18 +711,22 @@ def compute_jitter(proto, jitter_values, jitter_index, bpf):
         stddev = math.sqrt(stddev / (len(data) - 1))
 
         stddev /= 10**6
+        avg_ns /= 10**6
 
     print("Jitter[STDDEV] " + proto + ": %.4f ms" % stddev, flush=True)
-    print("Average " + proto + ": %.4f ms" % (avg_ns/(10**6)), flush=True)
+    print("Average " + proto + ": %.4f ms" % avg_ns, flush=True)
     print("", flush=True)
+    
+    return avg_ns, stddev
 
 
 # -----------------------------------------------------------------------------
 
 
 (MEASURE_IN_BITS_PER_SEC, INTERFACES, INTERVAL_throughput, rules_json,
-    INTERVAL_JITTER, TEST_THROUGHPUT, TEST_JITTER, PACKET_LOSS) = take_args()
+    INTERVAL_JITTER, TEST_THROUGHPUT, TEST_JITTER, PACKET_LOSS, SERVER_PORT) = take_args()
 
+prom.start_http_server(SERVER_PORT)
 
 # apply filters
 INTERVAL_JITTER_ns = INTERVAL_JITTER * 10**6
@@ -759,9 +823,17 @@ try:
         jitter_index = bpf.get_table('jitter_index_hash')
         
         if TEST_THROUGHPUT is False and PACKET_LOSS is False:
-            compute_jitter("TCP", jitter_values, jitter_index, bpf)
-            compute_jitter("UDP", jitter_values, jitter_index, bpf)
-            compute_jitter("ICMP", jitter_values, jitter_index, bpf)
+            avg_tcp, stddev_tcp = compute_jitter("TCP", jitter_values, jitter_index, bpf)
+            avg_udp, stddev_udp = compute_jitter("UDP", jitter_values, jitter_index, bpf)
+            avg_icmp, stddev_icmp = compute_jitter("ICMP", jitter_values, jitter_index, bpf)
+            
+            gauges_dict['TCP']['jitter']['avg'].set(avg_tcp)
+            gauges_dict['TCP']['jitter']['stddev'].set(stddev_tcp)
+            gauges_dict['UDP']['jitter']['avg'].set(avg_udp)
+            gauges_dict['UDP']['jitter']['stddev'].set(stddev_udp)
+            gauges_dict['ICMP']['jitter']['avg'].set(avg_icmp)
+            gauges_dict['ICMP']['jitter']['stddev'].set(stddev_icmp)
+
             print()
 
         # Throughput measurement
@@ -769,12 +841,17 @@ try:
             print("THROUGHPUT measurement on " + ", ".join(INTERFACES) +
                   " each " + str(INTERVAL_throughput) + " seconds:")
 
-            compute_throughput_goodput("TCP", count, initial_time, size_per_interval,
+            throughput_tcp = compute_throughput_goodput("TCP", count, initial_time, size_per_interval,
                                        total_size, prev_total_size, prev_throughput)
-            compute_throughput_goodput("UDP", count, initial_time, size_per_interval,
+            throughput_udp = compute_throughput_goodput("UDP", count, initial_time, size_per_interval,
                                        total_size, prev_total_size, prev_throughput)
-            compute_throughput_goodput("ICMP", count, initial_time, size_per_interval,
+            throughput_icmp = compute_throughput_goodput("ICMP", count, initial_time, size_per_interval,
                                        total_size, prev_total_size, prev_throughput)
+
+            gauges_dict['TCP']['throughput'].set(throughput_tcp)
+            gauges_dict['UDP']['throughput'].set(throughput_udp)
+            gauges_dict['ICMP']['throughput'].set(throughput_icmp)
+
             print()
 
         # Goodput measurement
@@ -782,15 +859,20 @@ try:
             print("GOODPUT measurement on " + ", ".join(INTERFACES) +
                   " each " + str(INTERVAL_throughput) + " seconds:")
 
-            compute_throughput_goodput("TCP", count, initial_time_goodput, 
+            goodput_tcp = compute_throughput_goodput("TCP", count, initial_time_goodput, 
                                        size_per_interval_goodput, total_size_goodput,
                                        prev_total_size_goodput, prev_goodput)
-            compute_throughput_goodput("UDP", count, initial_time_goodput, 
+            goodput_udp = compute_throughput_goodput("UDP", count, initial_time_goodput, 
                                        size_per_interval_goodput, total_size_goodput,
                                        prev_total_size_goodput, prev_goodput)
-            compute_throughput_goodput("ICMP", count, initial_time_goodput, 
+            goodput_icmp = compute_throughput_goodput("ICMP", count, initial_time_goodput, 
                                        size_per_interval_goodput, total_size_goodput,
                                        prev_total_size_goodput, prev_goodput)
+
+            gauges_dict['TCP']['goodput'].set(goodput_tcp)
+            gauges_dict['UDP']['goodput'].set(goodput_udp)
+            gauges_dict['ICMP']['goodput'].set(goodput_icmp)
+
 
         # Packet loss 
         if TEST_THROUGHPUT is False and TEST_JITTER is False:
@@ -799,16 +881,36 @@ try:
             for proto, seq_mem in seq_hash.items():
                 proto = proto.value
 
-                if proto == socket.IPPROTO_TCP:
-                    print("TCP")
-                elif proto == socket.IPPROTO_UDP:
-                    print("UDP")
-                elif proto == socket.IPPROTO_ICMP:
-                    print("ICMP")
-                
                 total_sequence_errors = seq_mem.reverse_err + seq_mem.small_err + \
                     seq_mem.big_err
 
+                if proto == socket.IPPROTO_TCP:
+                    print("TCP")
+                    gauges_dict['TCP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
+                    gauges_dict['TCP']['pkt_drop']['count'].set(seq_mem.count)
+                    gauges_dict['TCP']['pkt_drop']['reverse_err'].set(seq_mem.reverse_err)
+                    gauges_dict['TCP']['pkt_drop']['small_err'].set(seq_mem.small_err)
+                    gauges_dict['TCP']['pkt_drop']['big_err'].set(seq_mem.big_err)
+                    gauges_dict['TCP']['pkt_drop']['total_err'].set(total_sequence_errors)
+
+                elif proto == socket.IPPROTO_UDP:
+                    print("UDP")
+                    gauges_dict['UDP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
+                    gauges_dict['UDP']['pkt_drop']['count'].set(seq_mem.count)
+                    gauges_dict['UDP']['pkt_drop']['reverse_err'].set(seq_mem.reverse_err)
+                    gauges_dict['UDP']['pkt_drop']['small_err'].set(seq_mem.small_err)
+                    gauges_dict['UDP']['pkt_drop']['big_err'].set(seq_mem.big_err)
+                    gauges_dict['UDP']['pkt_drop']['total_err'].set(total_sequence_errors)
+
+                elif proto == socket.IPPROTO_ICMP:
+                    print("ICMP")
+                    gauges_dict['ICMP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
+                    gauges_dict['ICMP']['pkt_drop']['count'].set(seq_mem.count)
+                    gauges_dict['ICMP']['pkt_drop']['reverse_err'].set(seq_mem.reverse_err)
+                    gauges_dict['ICMP']['pkt_drop']['small_err'].set(seq_mem.small_err)
+                    gauges_dict['ICMP']['pkt_drop']['big_err'].set(seq_mem.big_err)
+                    gauges_dict['ICMP']['pkt_drop']['total_err'].set(total_sequence_errors)
+                
                 print("\tseq_num: " + str(seq_mem.seq_num) + "\n\tcount: " +
                       str(seq_mem.count) + "\n\treverse_err: " + str(seq_mem.reverse_err) +
                       "\n\tsmall_err: " + str(seq_mem.small_err) + "\n\tbig_err: " +
