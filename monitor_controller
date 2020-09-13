@@ -26,8 +26,11 @@ def kill_process(cmd):
         except ProcessLookupError:
             pass
 
+
 def check_monitor():
-    cmd = "sudo python3 monitor.py"
+    return check_monitor_with("sudo python3 monitor.py")
+
+def check_monitor_with(cmd):
     running = False
     output = subprocess.check_output("ps aux | grep \"%s\"" % cmd, stderr=subprocess.STDOUT, shell=True).decode('UTF-8')
     output = output.split('\n')
@@ -37,17 +40,36 @@ def check_monitor():
             output = line
             break
 
-    running = output != ""
+    running = "monitor.py" in output
 
     return running
 
+def get_pids():
+    cmd = "python3 monitor.py"
+    output = subprocess.check_output("ps aux | grep \"%s\"" % cmd, stderr=subprocess.STDOUT, shell=True).decode('UTF-8')
+    output = output.split('\n')
+    ret = []
+
+    for line in output:
+        if "grep" not in line and "/bin/sh" not in line:
+            ret.append(line)
+
+    ret = list(map(lambda x: x.split(" "), ret))
+    ret = list(map(lambda x: ' '.join(x).split(), ret))
+    ret = list(filter(None, ret))
+    ret = list(map(lambda x: [x[1]] + x[10:], ret))
+    ret = list(map(lambda x: " ".join(x), ret))
+
+    return ret
+
 def start_monitor(args, detached):
     cmd = "sudo python3 monitor.py " + args
+    command = "sudo python3 monitor.py " + args
+
     if detached:
         cmd += " > /dev/null &"
-    monitor_running = check_monitor()
 
-    if monitor_running:
+    if check_monitor_with(command):
         print("Monitor.py is already running")
         exit(1)
 
@@ -55,8 +77,21 @@ def start_monitor(args, detached):
         print("To exit monitor.py press CTRL + C")
         time.sleep(2)
 
-    print("Starting monitor.py with {}".format(cmd))
+    print("Starting monitor.py with {}".format(command))
+
     os.system(cmd)
+
+    if detached:
+        time.sleep(2)
+        monitor_running = check_monitor_with(command)
+        # monitor_running = check_pid(pid)
+        if not monitor_running:
+            print("Error in launching monitor.py...")
+            time.sleep(0.3)
+            print("Check parameters")
+            print("Maybe port is already in use")
+            exit(-1)
+
 
 def stop_monitor():
     monitor_running = check_monitor()
@@ -68,26 +103,40 @@ def stop_monitor():
     else:
         print("Monitor.py is already stopped")
 
+
 def print_status():
     monitor_running = check_monitor()
 
     if monitor_running:
         print("Monitor.py is running")
+        print("PID\tCOMMAND")
+        pids = get_pids()
+        idx = 0
+        for line in pids:
+            if idx > 0 and idx % 2 == 0:
+                print(" ")
+            line = line.replace(" ", "\t", 1)
+            print(line)
+            idx += 1
     else:
         print("Monitor.py is not running")
 
     exit(1)
 
+
 def print_usage():
     print("Usage:")
-    print("sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-packet_loss]")
+    print("sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER]" + \ 
+          " [-test_throughput] [-test_jitter] [-packet_loss] [-server_port SERVER_PORT] [-conf JSON_PATH] ")
     print("sudo ./monitor_controller stop")
     print("sudo ./monitor_controller status")
+    print("sudo ./monitor_controller status pid1 pid2 pid3")
     exit(-1)
+
 
 def parse_args():
     if len(sys.argv) < 2:
-        print(print_usage())
+        print(print_usage())    
 
 
     monitor_args = " ".join(sys.argv[2:])
@@ -106,7 +155,18 @@ def parse_args():
     if start:
         start_monitor(monitor_args, detached)
     elif stop:
-        stop_monitor()
+        running_pids = get_pids()
+        running_pids = list(map(lambda x: x.split(" ")[0], running_pids))
+        pids = sys.argv[2:]
+        if len(pids) > 0:
+            for pid in pids:
+                if pid in running_pids:
+                    os.kill(int(pid), signal.SIGTERM)
+                    print("PID {} has been killed".format(pid))
+                else:
+                    print("PID {} does not corespond to a monitor.py process".format(pid))
+        else:
+            stop_monitor()
     elif status:
         print_status()
     else:
