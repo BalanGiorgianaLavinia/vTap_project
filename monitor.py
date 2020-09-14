@@ -10,6 +10,8 @@ import math
 import ctypes
 import prometheus_client as prom
 import socket
+import logging
+import datetime
 
 
 INDEX_IP_SRC = 0
@@ -74,6 +76,57 @@ gauges_dict = {
             "small_err": prom.Gauge('icmp_small_err', 'Number of small errors ICMP'),
             "big_err": prom.Gauge('icmp_big_err', 'Number of big errors ICMP'),
             "total_err": prom.Gauge('icmp_total_err', 'Number of total errors ICMP')
+        }
+    }
+}
+
+measured_values = {
+    "TCP": {
+        "throughput": 0,
+        "goodput": 0,
+        "jitter": {
+            "avg": 0,
+            "stddev": 0
+        },
+        "pkt_drop": {
+            "seq_num": 0,
+            "count": 0,
+            "reverse_err": 0,
+            "small_err": 0,
+            "big_err": 0,
+            "total_err": 0
+        }
+    },
+    "UDP": {
+        "throughput": 0,
+        "goodput": 0,
+        "jitter": {
+            "avg": 0,
+            "stddev": 0
+        },
+        "pkt_drop": {
+            "seq_num": 0,
+            "count": 0,
+            "reverse_err": 0,
+            "small_err": 0,
+            "big_err": 0,
+            "total_err": 0
+        }
+    },
+    "ICMP": {
+        "throughput": 0,
+        "goodput": 0,
+        "jitter": {
+            "avg": 0,
+            "stddev": 0
+        },
+        "pkt_drop": {
+            "seq_num": 0,
+            "count": 0,
+            "reverse_err": 0,
+            "small_err": 0,
+            "big_err": 0,
+            "total_err": 0
         }
     }
 }
@@ -346,8 +399,7 @@ def get_ip(interface):
         exit(0)
     except KeyError:
         return "NO_IP"
-        # print("Error: The interface must have an assigned IP address")
-        # exit(0)
+        
     return ip
 
 
@@ -612,10 +664,11 @@ def f_filter(bpf_text, rules_json):
 
 
 def filter_packet_loss(bpf_text, PACKET_LOSS):
-    # if PACKET_LOSS:
+    
     # pattern is given in hex
     PATTERN = rules_json["PATTERN"]
     PATTERN = int(PATTERN, 16)
+    
     OFFSET = rules_json["OFFSET"]
     SEQ_THRESHOLD = rules_json["SEQUENCE_THRESHOLD"]
 
@@ -669,6 +722,7 @@ def compute_throughput_goodput(proto, count, initial_time, size_per_interval,
 
     # return throughput in Bytes
     return throughput
+
 
 # -----------------------------------------------------------------------------
 
@@ -738,14 +792,50 @@ def compute_jitter(proto, jitter_values, jitter_index, bpf):
 
     return avg_ns, stddev
 
+
+# -----------------------------------------------------------------------------
+
+
 def convert_display_dict(DISPLAY):
     for key in DISPLAY.keys():
         DISPLAY[key] = DISPLAY[key] == "True"
     return DISPLAY
 
+
+# -----------------------------------------------------------------------------
+
+
 def is_port_in_use(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('localhost', port)) == 0
+
+
+# -----------------------------------------------------------------------------
+
+
+def gen_log_file_name():
+    date = datetime.datetime.now().strftime('%Y-%m-%d_%H:%M')
+    name = "monitor_{}_{}.log".format(os.getpid(), date)
+
+    return name
+
+
+# -----------------------------------------------------------------------------
+
+
+def init_logger():
+    log_name = gen_log_file_name()
+    logging.basicConfig(filename=log_name, filemode='w', level=logging.INFO, 
+                        format='%(asctime)s.%(msecs)03d %(message)s', datefmt='%Y-%m-%d,%H:%M:%S')
+    logging.info("TCP_Throughput (bytes/sec) | TCP_Goodput (bytes/sec) | TCP_Jitter_AVG (ms) | TCP_Jitter_STDDEV (ms) | " + \
+                "TCP_seq_num | TCP_count | TCP_reverse_error | TCP_small_err | TCP_big_err | TCP_total_err | " + \
+                
+                "UDP_Throughput (bytes/sec) | UDP_Goodput (bytes/sec) | UDP_Jitter_AVG (ms) | UDP_Jitter_STDDEV (ms) | " + \
+                "UDP_seq_num | UDP_count | UDP_reverse_error | UDP_small_err | UDP_big_err | UDP_total_err | " + \
+                
+                "ICMP_Throughput (bytes/sec) | ICMP_Goodput (bytes/sec) | ICMP_Jitter_AVG (ms) | ICMP_Jitter_STDDEV (ms) | " + \
+                "ICMP_seq_num | ICMP_count | ICMP_reverse_error | ICMP_small_err | ICMP_big_err | ICMP_total_err")
+
 
 # -----------------------------------------------------------------------------
 
@@ -756,6 +846,10 @@ def is_port_in_use(port):
 MONITOR_SERVER = rules_json["MONITOR_SERVER"] == "True"
 DISPLAY = rules_json["DISPLAY"]
 DISPLAY = convert_display_dict(DISPLAY)
+LOGGER_ENABLED = rules_json["LOG_DATA"] == "True"
+
+if LOGGER_ENABLED:
+    init_logger()
 
 if MONITOR_SERVER:
     if is_port_in_use(SERVER_PORT):
@@ -826,6 +920,7 @@ jitter_values = {socket.IPPROTO_TCP: None,
 
 # -----------------------------------------------------------------------------
 
+
 prev_time = time.time()
 try:
     while True:
@@ -871,6 +966,14 @@ try:
                 avg_udp, stddev_udp = compute_jitter("UDP", jitter_values, jitter_index, bpf)
                 avg_icmp, stddev_icmp = compute_jitter("ICMP", jitter_values, jitter_index, bpf)
 
+                if LOGGER_ENABLED:
+                    measured_values['TCP']['jitter']['avg'] = avg_tcp
+                    measured_values['TCP']['jitter']['stddev'] = stddev_tcp
+                    measured_values['UDP']['jitter']['avg'] = avg_udp
+                    measured_values['UDP']['jitter']['stddev'] = stddev_udp
+                    measured_values['ICMP']['jitter']['avg'] = avg_icmp
+                    measured_values['ICMP']['jitter']['stddev'] = stddev_icmp
+
                 if MONITOR_SERVER:
                     gauges_dict['TCP']['jitter']['avg'].set(avg_tcp)
                     gauges_dict['TCP']['jitter']['stddev'].set(stddev_tcp)
@@ -894,6 +997,11 @@ try:
                                         total_size, prev_total_size, prev_throughput)
                 throughput_icmp = compute_throughput_goodput("ICMP", count, initial_time, size_per_interval,
                                         total_size, prev_total_size, prev_throughput)
+
+                if LOGGER_ENABLED:
+                    measured_values['TCP']['throughput'] = throughput_tcp
+                    measured_values['UDP']['throughput'] = throughput_udp
+                    measured_values['ICMP']['throughput'] = throughput_icmp
 
                 if MONITOR_SERVER:
                     gauges_dict['TCP']['throughput'].set(throughput_tcp)
@@ -919,6 +1027,11 @@ try:
                                         size_per_interval_goodput, total_size_goodput,
                                         prev_total_size_goodput, prev_goodput)
 
+                if LOGGER_ENABLED:
+                    measured_values['TCP']['goodput'] = goodput_tcp
+                    measured_values['UDP']['goodput'] = goodput_udp
+                    measured_values['ICMP']['goodput'] = goodput_icmp
+
                 if MONITOR_SERVER:
                     gauges_dict['TCP']['goodput'].set(goodput_tcp)
                     gauges_dict['UDP']['goodput'].set(goodput_udp)
@@ -938,6 +1051,16 @@ try:
 
                     if proto == socket.IPPROTO_TCP:
                         print("TCP")
+
+
+                        if LOGGER_ENABLED:
+                            measured_values['TCP']['pkt_drop']['seq_num'] = seq_mem.seq_num
+                            measured_values['TCP']['pkt_drop']['count'] = seq_mem.count
+                            measured_values['TCP']['pkt_drop']['reverse_err'] = seq_mem.reverse_err
+                            measured_values['TCP']['pkt_drop']['small_err'] = seq_mem.small_err
+                            measured_values['TCP']['pkt_drop']['big_err'] = seq_mem.big_err
+                            measured_values['TCP']['pkt_drop']['total_err'] = total_sequence_errors
+
                         if MONITOR_SERVER:
                             gauges_dict['TCP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
                             gauges_dict['TCP']['pkt_drop']['count'].set(seq_mem.count)
@@ -948,6 +1071,15 @@ try:
 
                     elif proto == socket.IPPROTO_UDP:
                         print("UDP")
+                        
+                        if LOGGER_ENABLED:
+                            measured_values['UDP']['pkt_drop']['seq_num'] = seq_mem.seq_num
+                            measured_values['UDP']['pkt_drop']['count'] = seq_mem.count
+                            measured_values['UDP']['pkt_drop']['reverse_err'] = seq_mem.reverse_err
+                            measured_values['UDP']['pkt_drop']['small_err'] = seq_mem.small_err
+                            measured_values['UDP']['pkt_drop']['big_err'] = seq_mem.big_err
+                            measured_values['UDP']['pkt_drop']['total_err'] = total_sequence_errors
+
                         if MONITOR_SERVER:
                             gauges_dict['UDP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
                             gauges_dict['UDP']['pkt_drop']['count'].set(seq_mem.count)
@@ -958,6 +1090,15 @@ try:
 
                     elif proto == socket.IPPROTO_ICMP:
                         print("ICMP")
+                
+                        if LOGGER_ENABLED:
+                            measured_values['ICMP']['pkt_drop']['seq_num'] = seq_mem.seq_num
+                            measured_values['ICMP']['pkt_drop']['count'] = seq_mem.count
+                            measured_values['ICMP']['pkt_drop']['reverse_err'] = seq_mem.reverse_err
+                            measured_values['ICMP']['pkt_drop']['small_err'] = seq_mem.small_err
+                            measured_values['ICMP']['pkt_drop']['big_err'] = seq_mem.big_err
+                            measured_values['ICMP']['pkt_drop']['total_err'] = total_sequence_errors
+
                         if MONITOR_SERVER:
                             gauges_dict['ICMP']['pkt_drop']['seq_num'].set(seq_mem.seq_num)
                             gauges_dict['ICMP']['pkt_drop']['count'].set(seq_mem.count)
@@ -972,6 +1113,30 @@ try:
                         str(seq_mem.big_err) + "\n\ttotal_sequence_errors: " +
                         str(total_sequence_errors))
 
+
+        if LOGGER_ENABLED:
+            log_text = ("{} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | " + \
+                        "{} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}").format(
+                        measured_values['TCP']['throughput'], measured_values['TCP']['goodput'],
+                        measured_values['TCP']['jitter']['avg'], measured_values['TCP']['jitter']['stddev'],
+                        measured_values['TCP']['pkt_drop']['seq_num'], measured_values['TCP']['pkt_drop']['count'],
+                        measured_values['TCP']['pkt_drop']['reverse_err'], measured_values['TCP']['pkt_drop']['small_err'],
+                        measured_values['TCP']['pkt_drop']['big_err'], measured_values['TCP']['pkt_drop']['total_err'],
+                        
+                        measured_values['UDP']['throughput'], measured_values['UDP']['goodput'],
+                        measured_values['UDP']['jitter']['avg'], measured_values['UDP']['jitter']['stddev'],
+                        measured_values['UDP']['pkt_drop']['seq_num'], measured_values['UDP']['pkt_drop']['count'],
+                        measured_values['UDP']['pkt_drop']['reverse_err'], measured_values['UDP']['pkt_drop']['small_err'],
+                        measured_values['UDP']['pkt_drop']['big_err'], measured_values['UDP']['pkt_drop']['total_err'],
+                                            
+                        measured_values['ICMP']['throughput'], measured_values['ICMP']['goodput'],
+                        measured_values['ICMP']['jitter']['avg'], measured_values['ICMP']['jitter']['stddev'],
+                        measured_values['ICMP']['pkt_drop']['seq_num'], measured_values['ICMP']['pkt_drop']['count'],
+                        measured_values['ICMP']['pkt_drop']['reverse_err'], measured_values['ICMP']['pkt_drop']['small_err'],
+                        measured_values['ICMP']['pkt_drop']['big_err'], measured_values['ICMP']['pkt_drop']['total_err'],
+                        )
+            logging.info(log_text)
+        
 
 except KeyboardInterrupt:
     pass

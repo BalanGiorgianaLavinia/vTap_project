@@ -13,5 +13,6 @@
     "PATTERN": "0xE7A5C318",
     "OFFSET": 4,
     "SEQUENCE_THRESHOLD": 2,
-    "MONITOR_SERVER": "True"
+    "MONITOR_SERVER": "True",
+    "LOG_DATA": "True"
 }

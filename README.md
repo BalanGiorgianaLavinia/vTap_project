@@ -5,21 +5,21 @@ Current version displays THROUGHPUT, GOODPUT, JITTER and PACKET LOSS statistics 
 
 ## Throughput and Goodput
 The measurements are displayed in Bytes/second by default. You can choose to dispay them in bits/second with "-b" parameter.
-Throughput is calculated using the entire packet size including ethernet header, while goodput is calculated related only to the effective data (payload of TCP/UDP/ICMP packet).
+Throughput is calculated using the entire packet size including ethernet header, while goodput is calculated related only to the effective data (payload of TCP/UDP/ICMP packet). You can choose the interval on which to calculate throughput with '-t seconds' parameter.
 
 ## Jitter
 The program displays the average inter-arrival time and the jitter calculated as standard deviation in miliseconds.
 If a greater than 2 seconds inter-arrival time is found then this means that the flow probably stopped and the jitter is resetted and calculated for the next packets. 
 
 ## Packet Loss
-Even if you do not want a packet drop measurement, you must fill the offset and pattern fields from json file; you can leave -1 in offset field and "0xFFFFFFFF" in pattern field from config.json file.
-The program displays packet loss related statistics second by second such as: current sequence number, total number of received packets from the beginning of the program, number of reverse errors (how many packets with smaller seq number than the current one are received), small and big errors (number of packets for which the difference between its seq numbers and the previous one is smaller or greater than a sequence threshold). You can give the sequence threshold in **config.json**.
+Even if you do not want a packet drop measurement, you must fill the offset and pattern fields from json file; you can leave -1 in offset field and "0xFFFFFFFF" in pattern field from json file.
+The program displays packet loss related statistics second by second such as: current sequence number, total number of received packets from the beginning of the program, number of reverse errors (how many packets with smaller seq number than the current one are received), small and big errors (number of packets for which the difference between its seq numbers and the previous one is smaller or greater than a sequence threshold). You can give the sequence threshold in **json file**.
 
 For UDP and ICMP packets you can give to the program a 32-bit offset relative to the beginning of the packet payload (effective data) or a 32-bit pattern (in packet payload, too; this should be given if other encapsulations are/can be added to the packet) and a 32-bit offset (relative to the beginning of the given pattern) where the program will find the sequence number.  
 
 **Constraint**: The pattern should be given in the first 5000 bytes of the packet payload due to eBPF constraints.
 
-The pattern and the offset should be given in **config.json** in *PATTERN* and *OFFSET* fields.
+The pattern and the offset should be given in **json file** in *PATTERN* and *OFFSET* fields.
 
 # Requirements
 You need to have the following software:
@@ -53,33 +53,85 @@ You need to have the following software:
 # Usage
 The monitor program can be started with the below command from vtap-project directory:
 
-    sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-packet_loss]
-
-    sudo ./monitor_controller stop
-
-    sudo ./monitor_controller status
+    sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-server_port SERVER_PORT] [-conf JSON_PATH]
 
 or
 
-    sudo python3 monitor.py [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-packet_loss]
+    sudo python3 monitor.py [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER] [-server_port SERVER_PORT] [-conf JSON_PATH]
+
+### Parameters: 
+    [-i INTERFACES]: specify to monitor program on which interfaces to listen
+        Default: all interfaces
+
+    [-t INTERVAL_THROUGHPUT]: specify a number in seconds in which to do the measurements
+        Default: 1 second
+
+    [-b]: specify it if you want to display throughput / goodput in bits/second 
+        Default: Bytes/second
+
+    [-server_port SERVER_PORT]: specify the port of the server in which monitor data is published
+        Default: 8080
+
+    [-conf JSON_PATH]: specify the relative path to the json file
+        Default: config.json file from current directory
+
+**Json file**  must contains the following fields:
+    
+    RULES -> contains all the rules that the monitored flow should satisfy. More details in "Filtering packets" section.
+
+    DISPLAY -> enable/disable wanted measurements; True to display and False to not
+
+    PATTERN -> specify the pattern as a referenced point for sequence number
+        Note: The pattern must be specified in hexa decimal format as a string
+              You must specify "0xFFFFFFFF" if you do not need pattern matching
+
+    OFFSET -> specify the offset from where to get the sequence number
+        Note: You must specify -1 if you do not want a sequence errors measurement
+
+    SEQUENCE_THRESHOLD -> the threshold for small / big errors
+
+    MONITOR_SERVER -> True for starting the metrics server (for Prometheus to scrape)
+                      False otherwise
+
+    LOG_DATA -> enable/disable logging to file
 
 ## Monitor controller:
-Parameters:
+### Parameters:
 
     start               -> starts the monitor program in interactive mode (the output is displayed continuously)
+        For example: sudo ./monitor_controller start -i veth1 -b -server_port 9000
+
     start --detached    -> starts the monitor program in detached mode (the program is running in background)
-    stop                -> stops the monitor program
-    status              -> prints if the monitor program is running or not
+        For example: sudo ./monitor_controller start --detached -i veth0 -b -server_port 3030
+
+    stop                -> stops all instances of the monitor program
+        Command: sudo ./monitor_controller stop
+        
+    status              -> prints all running instances (pid + command)
+        Command: sudo ./monitor_controller status
+
+You can stop one or more instances of the program with:
+
+    sudo ./monitor_controller stop pid_1 pid_2
+where the pids of the processes can be taken from controller status output.
+
+You can not start the monitor program with the same server port as another instance.
     
 NOTE! --detached has to be used immediately after start
 
 ## Starting Prometheus and Grafana containers:
+From vtap_project/prometheus_grafana/ directory:
+
     sudo docker-compose up -d prometheus grafana grafana-dashboards
    
 ## Stopping Prometheus and Grafana containers:
+From vtap_project/prometheus_grafana/ directory:
+
     sudo docker stop prometheus-svc grafana grafana-dashboards
     
 ## Resetting Prometheus and Grafana containers:
+From vtap_project/prometheus_grafana/ directory:
+
     sudo docker rm -f prometheus-svc grafana grafana-dashboards
     sudo docker-compose up -d prometheus grafana grafana-dashboards
 
@@ -93,11 +145,11 @@ NOTE! --detached has to be used immediately after start
     sudo python3 monitor.py -h
 
 ## Example:
-    sudo ./monitor_controller --detached -i veth1
-    sudo python3 monitor.py -i veth1
+    sudo ./monitor_controller --detached -i veth1 -b
+    sudo python3 monitor.py -i eth0 -server_port 3040 
 
 ## Filtering packets
-To add one or more rules for filtering the packets open config.json and add them in the RULES dictionary.
+To add one or more rules for filtering the packets open json file and add them in the RULES dictionary.
 You have some examples in the EXAMPLES dictionary.
 The "-" character means that the coresponding item is not taken into consideration for filtering.
 

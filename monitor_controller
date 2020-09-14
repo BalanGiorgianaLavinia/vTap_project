@@ -27,8 +27,15 @@ def kill_process(cmd):
             pass
 
 
+# -----------------------------------------------------------------------------
+
+
 def check_monitor():
     return check_monitor_with("sudo python3 monitor.py")
+
+
+# -----------------------------------------------------------------------------
+
 
 def check_monitor_with(cmd):
     running = False
@@ -43,6 +50,10 @@ def check_monitor_with(cmd):
     running = "monitor.py" in output
 
     return running
+
+
+# -----------------------------------------------------------------------------
+
 
 def get_pids():
     cmd = "python3 monitor.py"
@@ -61,6 +72,10 @@ def get_pids():
     ret = list(map(lambda x: " ".join(x), ret))
 
     return ret
+
+
+# -----------------------------------------------------------------------------
+
 
 def start_monitor(args, detached):
     cmd = "sudo python3 monitor.py " + args
@@ -84,13 +99,16 @@ def start_monitor(args, detached):
     if detached:
         time.sleep(2)
         monitor_running = check_monitor_with(command)
-        # monitor_running = check_pid(pid)
+
         if not monitor_running:
             print("Error in launching monitor.py...")
             time.sleep(0.3)
             print("Check parameters")
             print("Maybe port is already in use")
             exit(-1)
+
+
+# -----------------------------------------------------------------------------
 
 
 def stop_monitor():
@@ -102,6 +120,9 @@ def stop_monitor():
         print("Monitor.py stopped")
     else:
         print("Monitor.py is already stopped")
+
+
+# -----------------------------------------------------------------------------
 
 
 def print_status():
@@ -124,14 +145,21 @@ def print_status():
     exit(1)
 
 
+# -----------------------------------------------------------------------------
+
+
 def print_usage():
     print("Usage:")
-    print("sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER]" + \ 
+    print("sudo ./monitor_controller start [--detached] [-h] [-i INTERFACES] [-t INTERVAL_THROUGHPUT] [-b] [-j INTERVAL_JITTER]" + \
           " [-test_throughput] [-test_jitter] [-packet_loss] [-server_port SERVER_PORT] [-conf JSON_PATH] ")
     print("sudo ./monitor_controller stop")
     print("sudo ./monitor_controller status")
     print("sudo ./monitor_controller status pid1 pid2 pid3")
+
     exit(-1)
+
+
+# -----------------------------------------------------------------------------
 
 
 def parse_args():
@@ -172,5 +200,7 @@ def parse_args():
     else:
         print_usage()
 
+
+# -----------------------------------------------------------------------------
 
 parse_args()
