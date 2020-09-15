@@ -48,7 +48,7 @@ def check_monitor_with(cmd):
             break
 
     running = "monitor.py" in output
-
+    
     return running
 
 
@@ -78,8 +78,13 @@ def get_pids():
 
 
 def start_monitor(args, detached):
-    cmd = "sudo python3 monitor.py " + args
-    command = "sudo python3 monitor.py " + args
+    if len(args) < 2:
+        args = ""
+    else:
+        args = " " + args
+
+    cmd = "sudo python3 monitor.py" + args
+    command = "sudo python3 monitor.py" + args
 
     if detached:
         cmd += " > /dev/null &"

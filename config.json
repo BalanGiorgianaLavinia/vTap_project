@@ -14,5 +14,5 @@
     "OFFSET": 4,
     "SEQUENCE_THRESHOLD": 2,
     "MONITOR_SERVER": "True",
-    "LOG_DATA": "True"
+    "LOG_DATA": "False"
 }
